@@ -50,10 +50,8 @@
 #include <qrgui/dialogs/findReplaceDialog.h>
 #include <qrgui/editor/propertyEditorView.h>
 #include <qrgui/models/propertyEditorModel.h>
-#include <qrgui/plugins/pluginManager/interpretedPluginsLoader.h>
 #include <qrgui/plugins/pluginManager/toolPluginManager.h>
 #include <qrgui/plugins/pluginManager/editorManagerInterface.h>
-#include <qrgui/plugins/pluginManager/proxyEditorManager.h>
 #include <qrgui/plugins/toolPluginInterface/systemEvents.h>
 #include <qrgui/systemFacade/systemFacade.h>
 
@@ -76,6 +74,7 @@
 #include <mouseGestures/gesturesWidget.h>
 
 #include <textEditor/textManager.h>
+#include <textEditor/codeBlockManager.h>
 #include <textEditor/qscintillaTextEdit.h>
 
 #include "qrealApplication.h"
@@ -365,11 +364,6 @@ void MainWindow::clearSelectionOnTabs()
 			tab->scene()->clearSelection();
 		}
 	}
-}
-
-void MainWindow::addEditorElementsToPalette(const Id &editor, const Id &diagram)
-{
-	mUi->paletteTree->addEditorElements(editorManager(), editor, diagram);
 }
 
 void MainWindow::adjustMinimapZoom(int zoom)
@@ -795,7 +789,7 @@ void MainWindow::closeTab(int index)
 
 	if (diagram) {
 		const Id diagramId = diagram->editorViewScene().rootItemId();
-		mController->diagramClosed(diagramId);
+		mController->moduleClosed(diagramId.toString());
 		emit mFacade->events().diagramClosed(diagramId);
 	} else if (mTextManager->unbindCode(possibleCodeTab)) {
 		emit mFacade->events().codeTabClosed(QFileInfo(path));
@@ -1024,7 +1018,7 @@ void MainWindow::openNewTab(const QModelIndex &arg)
 		view->mutableScene().enableMouseGestures(qReal::SettingsManager::value("gesturesEnabled").toBool());
 		SettingsListener::listen("gesturesEnabled", &(view->mutableScene()), &EditorViewScene::enableMouseGestures);
 		SettingsListener::listen("gesturesEnabled", mUi->actionGesturesShow ,&QAction::setEnabled);
-		mController->diagramOpened(diagramId);
+		mController->moduleOpened(diagramId.toString());
 		initCurrentTab(view, index);
 		mUi->tabs->addTab(view, index.data().toString());
 		mUi->tabs->setCurrentWidget(view);
@@ -1216,11 +1210,11 @@ void MainWindow::switchToTab(int index)
 			getCurrentTab()->mutableMvIface().setLogicalModel(models().logicalModel());
 			mRootIndex = editorView->mvIface().rootIndex();
 			const Id diagramId = models().graphicalModelAssistApi().idByIndex(mRootIndex);
-			mController->setActiveDiagram(diagramId);
+			mController->setActiveModule(diagramId.toString());
 		}
 	} else {
 		mUi->tabs->setEnabled(false);
-		mController->setActiveDiagram(Id());
+		mController->setActiveModule(QString());
 	}
 }
 
@@ -1378,18 +1372,12 @@ void MainWindow::showGestures()
 	}
 }
 
-
-ProxyEditorManager &MainWindow::editorManagerProxy()
-{
-	return *static_cast<ProxyEditorManager *>(&editorManager());
-}
-
 void MainWindow::createDiagram(const QString &idString)
 {
 	closeStartTab();
 	const Id id = Id::loadFromString(idString);
 	Id created;
-	if (editorManager().isNodeOrEdge(id.editor(), id.element())) {
+	if (editorManager().isNodeOrEdge(id.type())) {
 		created = models().graphicalModelAssistApi().createElement(Id::rootId(), id);
 	} else {
 		// It is a group
@@ -1467,6 +1455,8 @@ void MainWindow::setIndexesOfPropertyEditor(const Id &id)
 
 void MainWindow::highlight(const Id &graphicalId, bool exclusive, const QColor &color)
 {
+	highlightCode(models().graphicalModelAssistApi().logicalId(graphicalId), true);
+
 	for (int i = 0; i < mUi->tabs->count(); ++i) {
 		EditorView * const view = dynamic_cast<EditorView *>(mUi->tabs->widget(i));
 		if (!view) {
@@ -1481,8 +1471,29 @@ void MainWindow::highlight(const Id &graphicalId, bool exclusive, const QColor &
 	}
 }
 
+void MainWindow::highlightCode(Id const &graphicalId, bool highlight)
+{
+	text::QScintillaTextEdit *area = dynamic_cast<text::QScintillaTextEdit *>(currentTab());
+
+	if (area) {
+		if (highlight) {
+			QString const filePath = mTextManager->path(area);
+			QPair<int, int> const interval = mTextManager->codeBlockManager().intervalById(filePath, graphicalId);
+			area->setMarkerBackgroundColor(QColor::fromRgb(0, 255, 0));
+			area->markerDefine(text::QScintillaTextEdit::Background, text::QScintillaTextEdit::SC_MARK_BACKGROUND);
+			for (int i = interval.first; i <= interval.second; i++) {
+				area->markerAdd(i - 1, text::QScintillaTextEdit::SC_MARK_BACKGROUND);
+			}
+		} else {
+			area->markerDeleteAll();
+		}
+	}
+}
+
 void MainWindow::dehighlight(const Id &graphicalId)
 {
+	highlightCode(models().graphicalModelAssistApi().logicalId(graphicalId), false);
+
 	for (int i = 0; i < mUi->tabs->count(); ++i) {
 		EditorView * const view = dynamic_cast<EditorView *>(mUi->tabs->widget(i));
 		if (!view) {
@@ -1495,6 +1506,12 @@ void MainWindow::dehighlight(const Id &graphicalId)
 			scene->dehighlight();
 		} else {
 			scene->dehighlight(graphicalId);
+		}
+
+		for (text::QScintillaTextEdit *area : mTextManager->code(view->mvIface().rootId())) {
+			if (mTextManager->isDefaultPath(mTextManager->path(area))) {
+				area->markerDeleteAll();
+			}
 		}
 	}
 }
@@ -1735,6 +1752,7 @@ void MainWindow::initToolPlugins()
 	mToolManager->init(PluginConfigurator(models().repoControlApi()
 		, models().graphicalModelAssistApi()
 		, models().logicalModelAssistApi()
+		, *mController
 		, *this
 		, *this
 		, *mProjectManager
@@ -1808,29 +1826,6 @@ void MainWindow::customizeActionsVisibility()
 			break;
 		}
 	}
-}
-
-void MainWindow::initInterpretedPlugins()
-{
-	mInterpretedPluginLoader.reset(new InterpretedPluginsLoader(
-			editorManagerProxy().proxiedEditorManager()
-			, PluginConfigurator(
-					models().repoControlApi()
-					, models().graphicalModelAssistApi()
-					, models().logicalModelAssistApi()
-					, *this
-					, *this
-					, *mProjectManager
-					, *mSceneCustomizer
-					, mFacade->events()
-					, *mTextManager)
-			)
-	);
-
-	const QList<ActionInfo> actions = mInterpretedPluginLoader->listOfActions();
-	mListOfAdditionalActions = mInterpretedPluginLoader->menuActionsList();
-
-	traverseListOfActions(actions);
 }
 
 void MainWindow::showErrors(const gui::ErrorReporter * const errorReporter)

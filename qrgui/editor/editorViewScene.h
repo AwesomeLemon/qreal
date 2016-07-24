@@ -177,23 +177,23 @@ signals:
 		, bool useTypedPorts);
 
 protected:
-	void dragEnterEvent(QGraphicsSceneDragDropEvent *event);
-	void dragMoveEvent(QGraphicsSceneDragDropEvent *event);
-	void dragLeaveEvent(QGraphicsSceneDragDropEvent *event);
-	void dropEvent(QGraphicsSceneDragDropEvent *event);
+	void dragEnterEvent(QGraphicsSceneDragDropEvent *event) override;
+	void dragMoveEvent(QGraphicsSceneDragDropEvent *event) override;
+	void dragLeaveEvent(QGraphicsSceneDragDropEvent *event) override;
+	void dropEvent(QGraphicsSceneDragDropEvent *event) override;
 
-	void keyPressEvent(QKeyEvent *event);
-	void keyReleaseEvent(QKeyEvent *event);
+	void keyPressEvent(QKeyEvent *event) override;
+	void keyReleaseEvent(QKeyEvent *event) override;
 
-	void mousePressEvent(QGraphicsSceneMouseEvent *event);
-	void mouseReleaseEvent(QGraphicsSceneMouseEvent *mouseEvent);
-	void mouseMoveEvent(QGraphicsSceneMouseEvent *event);
+	void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
+	void mouseReleaseEvent(QGraphicsSceneMouseEvent *mouseEvent) override;
+	void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
+	void mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event) override;
 
-	void mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event);
+	void wheelEvent(QGraphicsSceneWheelEvent *wheelEvent) override;
 
-	void wheelEvent(QGraphicsSceneWheelEvent *wheelEvent);
-
-	virtual void drawBackground(QPainter *painter, const QRectF &rect);
+	void drawBackground(QPainter *painter, const QRectF &rect) override;
+	void focusInEvent(QFocusEvent *event);
 
 private slots:
 	void createEdge(const Id &id);
@@ -208,9 +208,9 @@ private slots:
 private:
 	void deleteElements(const IdList &idsToDelete);
 
-	void getLinkByGesture(NodeElement *parent, const NodeElement &child);
+	void getLinkByGesture(const NodeElement &from, const NodeElement &to);
 	void drawGesture();
-	void createEdgeMenu(const QList<Id> &ids);
+	void createEdgeMenu(const IdList &ids);
 
 	/// sets sceneRect to (0, 0, 1000, 1000) by adding its corners to the scene
 	/// (to keep ability of scene rect to grow automatically)
